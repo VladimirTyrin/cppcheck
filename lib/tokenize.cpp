@@ -269,7 +269,7 @@ bool Tokenizer::duplicateTypedef(Token **tokPtr, const Token *name, const Token 
             if (Token::simpleMatch(end, ") {")) { // function parameter ?
                 // look backwards
                 if (Token::Match(tok->previous(), "%type%") &&
-                    !Token::Match(tok->previous(), "return|new|const")) {
+                    !Token::Match(tok->previous(), "return|new|const|struct")) {
                     duplicateTypedefError(*tokPtr, name, "function parameter");
                     // duplicate definition so skip entire function
                     *tokPtr = end->next()->link();
@@ -351,8 +351,10 @@ bool Tokenizer::duplicateTypedef(Token **tokPtr, const Token *name, const Token 
                         tok = tok->previous();
                     }
 
-                    duplicateTypedefError(*tokPtr, name, "variable");
-                    return true;
+                    if ((*tokPtr)->strAt(1) != "(" || !Token::Match((*tokPtr)->linkAt(1), ") .|(|[")) {
+                        duplicateTypedefError(*tokPtr, name, "variable");
+                        return true;
+                    }
                 }
             }
         }
@@ -704,7 +706,8 @@ void Tokenizer::simplifyTypedef()
         } else if (Token::Match(tokOffset, "%type%")) {
             typeStart = tokOffset;
 
-            while (Token::Match(tokOffset, "const|signed|unsigned|struct|enum %type%") ||
+            while (Token::Match(tokOffset, "const|struct|enum %type%") ||
+                   (Token::Match(tokOffset, "signed|unsigned %type%") && tokOffset->next()->isStandardType()) ||
                    (tokOffset->next() && tokOffset->next()->isStandardType()))
                 tokOffset = tokOffset->next();
 
@@ -2467,7 +2470,7 @@ static bool setVarIdParseDeclaration(const Token **tok, const std::map<std::stri
         // In executable scopes, references must be assigned
         // Catching by reference is an exception
         if (executableScope && ref) {
-            if (Token::Match(tok2, "(|=|{"))
+            if (Token::Match(tok2, "(|=|{|:"))
                 ;   // reference is assigned => ok
             else if (tok2->str() != ")" || tok2->link()->strAt(-1) != "catch")
                 return false;   // not catching by reference => not declaration
@@ -2747,6 +2750,8 @@ void Tokenizer::setVarId()
             if (decl) {
                 const Token* prev2 = tok2->previous();
                 if (Token::Match(prev2, "%type% [;[=,)]") && tok2->previous()->str() != "const")
+                    ;
+                else if (Token::Match(prev2, "%type% :") && tok->strAt(-1) == "for")
                     ;
                 else if (Token::Match(prev2, "%type% ( !!)") && Token::simpleMatch(tok2->link(), ") ;")) {
                     // In C++ , a variable can't be called operator+ or something like that.
@@ -4405,10 +4410,8 @@ Token *Tokenizer::simplifyAddBracesToCommand(Token *tok)
         if (tokPossibleDo &&
             tokPossibleDo->str()=="}")
             tokPossibleDo=tokPossibleDo->link();
-        if (tokPossibleDo)
-            tokPossibleDo=tokPossibleDo->previous();
         if (!tokPossibleDo ||
-            tokPossibleDo->str()!="do")
+            tokPossibleDo->strAt(-1) != "do")
             tokEnd=simplifyAddBracesPair(tok,true);
     } else if (tok->str()=="do") {
         tokEnd=simplifyAddBracesPair(tok,false);
@@ -4426,16 +4429,15 @@ Token *Tokenizer::simplifyAddBracesToCommand(Token *tok)
         tokEnd=simplifyAddBracesPair(tok,true);
         if (!tokEnd)
             return nullptr;
-        Token * tokEndNext=tokEnd->next();
-        if (tokEndNext && tokEndNext->str()=="else") {
-            Token * tokEndNextNext=tokEndNext->next();
-            if (tokEndNextNext && tokEndNextNext->str()=="if")
+        if (tokEnd->strAt(1) == "else") {
+            Token * tokEndNextNext= tokEnd->tokAt(2);
+            if (!tokEndNextNext || tokEndNextNext->str() == "}")
+                syntaxError(tokEndNextNext);
+            if (tokEndNextNext->str() == "if")
                 // do not change "else if ..." to "else { if ... }"
                 tokEnd=simplifyAddBracesToCommand(tokEndNextNext);
-            else if (Token::simpleMatch(tokEndNext, "else }"))
-                syntaxError(tokEndNext);
             else
-                tokEnd=simplifyAddBracesPair(tokEndNext,false);
+                tokEnd=simplifyAddBracesPair(tokEnd->next(),false);
         }
     }
 
@@ -4445,28 +4447,24 @@ Token *Tokenizer::simplifyAddBracesToCommand(Token *tok)
 Token *Tokenizer::simplifyAddBracesPair(Token *tok, bool commandWithCondition)
 {
     Token * tokCondition=tok->next();
+    if (!tokCondition) // Missing condition
+        return tok;
+
     Token *tokAfterCondition=tokCondition;
     if (commandWithCondition) {
-        if (!tokCondition) {
-            // Missing condition
-            return tok;
-        }
         if (tokCondition->str()=="(")
             tokAfterCondition=tokCondition->link();
         else
-            tokAfterCondition=nullptr;
-        if (!tokAfterCondition || tokAfterCondition->strAt(1) == "]") {
-            // Bad condition
-            syntaxError(tok);
-        }
+            syntaxError(tok); // Bad condition
+
+        if (!tokAfterCondition || tokAfterCondition->strAt(1) == "]")
+            syntaxError(tok); // Bad condition
+
         tokAfterCondition=tokAfterCondition->next();
-    }
-    if (!tokAfterCondition ||
-        ((tokAfterCondition->tokType()==Token::eBracket ||
-          tokAfterCondition->tokType()==Token::eExtendedOp)&&
-         Token::Match(tokAfterCondition,")|}|>|,"))) {
-        // No tokens left where to add braces around
-        return tok;
+        if (!tokAfterCondition || Token::Match(tokAfterCondition, ")|}|,")) {
+            // No tokens left where to add braces around
+            return tok;
+        }
     }
     Token * tokBracesEnd=nullptr;
     if (tokAfterCondition->str()=="{") {
@@ -4492,24 +4490,17 @@ Token *Tokenizer::simplifyAddBracesPair(Token *tok, bool commandWithCondition)
         if (tokEnd->str()!="}") {
             // Token does not end with brace
             // Look for ; to add own closing brace after it
-            while (tokEnd &&
-                   tokEnd->str()!=";" &&
-                   !((tokEnd->tokType()==Token::eBracket ||
-                      tokEnd->tokType()==Token::eExtendedOp)&&
-                     Token::Match(tokEnd,")|}|>"))) {
-                if (tokEnd->tokType()==Token::eBracket ||
-                    (tokEnd->tokType()==Token::eExtendedOp && tokEnd->str()=="(")) {
-                    Token *tokInnerCloseBraket=tokEnd->link();
-                    if (!tokInnerCloseBraket) {
+            while (tokEnd && !Token::Match(tokEnd, ";|)|}")) {
+                if (tokEnd->tokType()==Token::eBracket || tokEnd->str() == "(") {
+                    tokEnd = tokEnd->link();
+                    if (!tokEnd) {
                         // Inner bracket does not close
                         return tok;
                     }
-                    tokEnd=tokInnerCloseBraket;
                 }
                 tokEnd=tokEnd->next();
             }
-            if (!tokEnd ||
-                tokEnd->str()!=";") {
+            if (!tokEnd || tokEnd->str() != ";") {
                 // No trailing ;
                 return tok;
             }
@@ -9173,12 +9164,12 @@ void Tokenizer::simplifyAssignmentInFunctionCall()
         else if (Token::Match(tok, "[;{}] %name% ( %name% =") &&
                  Token::simpleMatch(tok->linkAt(2), ") ;") &&
                  !Token::Match(tok->next(), "assert|while")) {
-            const std::string funcname(tok->next()->str());
-            const Token * const vartok = tok->tokAt(3);
+            const std::string& funcname(tok->next()->str());
+            Token* const vartok = tok->tokAt(3);
 
             // Goto ',' or ')'..
-            for (Token *tok2 = tok->tokAt(4); tok2; tok2 = tok2->next()) {
-                if (tok2->str() == "(")
+            for (Token *tok2 = vartok->tokAt(2); tok2; tok2 = tok2->next()) {
+                if (tok2->link() && Token::Match(tok2, "(|[|{"))
                     tok2 = tok2->link();
                 else if (tok2->str() == ";")
                     break;

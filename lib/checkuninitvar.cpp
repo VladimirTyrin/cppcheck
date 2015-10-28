@@ -78,7 +78,7 @@ void CheckUninitVar::checkScope(const Scope* scope)
                 tok = tok->next();
             while (Token::simpleMatch(tok->link(), "] ["))
                 tok = tok->link()->next();
-            if (Token::simpleMatch(tok->link(), "] ="))
+            if (Token::Match(tok->link(), "] =|{"))
                 continue;
         }
 
@@ -481,6 +481,11 @@ bool CheckUninitVar::checkScopeForVariable(const Token *tok, const Variable& var
 
         // bailout if there is assembler code or setjmp
         if (Token::Match(tok, "asm|setjmp (")) {
+            return true;
+        }
+
+        // bailout if there is a goto label
+        if (Token::Match(tok, "[;{}] %name% :")) {
             return true;
         }
 

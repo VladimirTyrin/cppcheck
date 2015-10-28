@@ -3147,6 +3147,19 @@ private:
               "    per_state_info() : enter(0), exit(0), events(0) {}\n"
               "};", nullptr, false, false, false);
         ASSERT_EQUALS("", errout.str());
+
+        // #6664
+        check("void foo() {\n"
+              "    (beat < 100) ? (void)0 : exit(0);\n"
+              "    bar();\n"
+              "}", nullptr, false, false, false, &settings);
+        ASSERT_EQUALS("", errout.str());
+
+        check("void foo() {\n"
+              "    (beat < 100) ? exit(0) : (void)0;\n"
+              "    bar();\n"
+              "}", nullptr, false, false, false, &settings);
+        ASSERT_EQUALS("", errout.str());
     }
 
 
@@ -6108,6 +6121,12 @@ private:
               "    lambda(13.3);\n"
               "    return 0;\n"
               "}");
+        ASSERT_EQUALS("", errout.str());
+
+        // #6669
+        check("void foo(size_t size) {\n"
+              "   void * res{malloc(size)};\n"
+              "}", "test.cpp", false, false, true, &settings);
         ASSERT_EQUALS("", errout.str());
     }
 

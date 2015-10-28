@@ -318,6 +318,8 @@ private:
         TEST_CASE(removeattribute);
         TEST_CASE(functionAttributeBefore);
         TEST_CASE(functionAttributeAfter);
+
+        TEST_CASE(cpp03template1);
         TEST_CASE(cpp0xtemplate1);
         TEST_CASE(cpp0xtemplate2);
         TEST_CASE(cpp0xtemplate3);
@@ -4716,6 +4718,21 @@ private:
         ASSERT(func5 && func5->isAttributeNoreturn());
     }
 
+    void cpp03template1() {
+        {
+            const char *code = "template<typename> struct extent {};";
+            ASSERT_EQUALS("template < typename > struct extent { } ;", tokenizeAndStringify(code));
+        }
+        {
+            const char *code = "template<typename> struct extent;";
+            ASSERT_EQUALS("template < typename > struct extent ;", tokenizeAndStringify(code));
+        }
+        {
+            const char *code = "template<typename, unsigned = 0> struct extent;";
+            ASSERT_EQUALS("template < typename , unsigned int = 0 > struct extent ;", tokenizeAndStringify(code));
+        }
+    }
+
     void cpp0xtemplate1() {
         const char *code = "template <class T>\n"
                            "void fn2 (T t = []{return 1;}())\n"
@@ -5655,6 +5672,7 @@ private:
 
     void simplifyAssignmentInFunctionCall() {
         ASSERT_EQUALS("; x = g ( ) ; f ( x ) ;", tokenizeAndStringify(";f(x=g());"));
+        ASSERT_EQUALS("; hs = ( xyz_t ) { h . centerX , h . centerY , 1 + index } ; putInput ( hs , 1 ) ;", tokenizeAndStringify(";putInput(hs = (xyz_t) { h->centerX, h->centerY, 1 + index }, 1);"));
     }
 
     void simplifyRoundCurlyParentheses() {
@@ -8088,6 +8106,7 @@ private:
         ASSERT_EQUALS("ab.3c-(delete", testAst("delete[] a.b(3 - c);"));
         ASSERT_EQUALS("a::new=", testAst("a = new (b) ::X;"));
         ASSERT_EQUALS("aA1(new(bB2(new(,", testAst("a(new A(1)), b(new B(2))"));
+        ASSERT_EQUALS("Fred10[new", testAst(";new Fred[10];"));
 
         // invalid code (libreoffice), don't hang
         // #define SlideSorterViewShell

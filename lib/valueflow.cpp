@@ -363,6 +363,11 @@ static bool addValue(Token *tok, const ValueFlow::Value &value)
         tok->values.clear();
     }
 
+    // Don't handle more than 10 values for performance reasons
+    // TODO: add setting?
+    if (tok->values.size() >= 10U)
+        return false;
+
     // if value already exists, don't add it again
     std::list<ValueFlow::Value>::iterator it;
     for (it = tok->values.begin(); it != tok->values.end(); ++it) {
@@ -1141,13 +1146,16 @@ static bool valueFlowForward(Token * const               startToken,
                 }
             }
 
+            const Token * const condTok = tok2->next()->astOperand2();
+            const bool condAlwaysTrue = (condTok && condTok->values.size() == 1U && condTok->values.front().isKnown() && condTok->values.front().intvalue != 0);
+
             // Should scope be skipped because variable value is checked?
             std::list<ValueFlow::Value> truevalues;
             for (std::list<ValueFlow::Value>::const_iterator it = values.begin(); it != values.end(); ++it) {
-                if (!conditionIsFalse(tok2->next()->astOperand2(), getProgramMemory(tok2, varid, *it)))
+                if (condAlwaysTrue || !conditionIsFalse(condTok, getProgramMemory(tok2, varid, *it)))
                     truevalues.push_back(*it);
             }
-            if (truevalues.size() != values.size()) {
+            if (truevalues.size() != values.size() || condAlwaysTrue) {
                 // '{'
                 Token * const startToken1 = tok2->linkAt(1)->next();
 
@@ -1166,6 +1174,10 @@ static bool valueFlowForward(Token * const               startToken,
 
                 // goto '}'
                 tok2 = startToken1->link();
+
+                if (condAlwaysTrue && isReturn(tok2))
+                    return false;
+
                 continue;
             }
 
